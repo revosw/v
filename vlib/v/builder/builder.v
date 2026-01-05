@@ -117,6 +117,14 @@ pub fn (mut b Builder) front_stages(v_files []string) ! {
 
 	b.parse_imports()
 
+	// C.TYPE() cannot be determined to be a cast unless Table.type_idxs contains
+	// C.TYPE. type_idxs is populated only after all parsing is done.
+	for mut file in b.parsed_files {
+		for i in 0 .. file.stmts.len {
+			file.stmts[i] = parser.transform_stmt(file.stmts[i], mut b.table)
+		}
+	}
+
 	timers.show('SCAN')
 	timers.show('PARSE')
 	timers.show_if_exists('PARSE stmt')

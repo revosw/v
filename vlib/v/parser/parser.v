@@ -437,6 +437,176 @@ pub fn parse_files(paths []string, mut table ast.Table, pref_ &pref.Preferences)
 	}
 }
 
+// Only used for replacing CallExpr with CastExpr after parsing
+pub fn transform_expr(expr ast.Expr, mut table ast.Table) ast.Expr {
+	match expr {
+		ast.CallExpr {
+			// Check if this is a C type (e.g., C.int, C.TEST)
+			if expr.name.starts_with('C.') {
+				typ_idx := table.find_type_idx(expr.name)
+				if typ_idx != 0 {
+					// Transform to CastExpr
+					return ast.CastExpr{
+						typ:       typ_idx
+						expr:      if expr.args.len > 0 {
+							transform_expr(expr.args[0].expr, mut table)
+						} else {
+							ast.empty_expr
+						}
+						typname:   expr.name
+						expr_type: 8
+						pos:       expr.pos
+					}
+				}
+			}
+			// Keep as CallExpr but transform children
+			return ast.CallExpr{
+				...expr
+				left: transform_expr(expr.left, mut table)
+				args: expr.args.map(ast.CallArg{ ...it, expr: transform_expr(it.expr, mut
+					table) })
+			}
+		}
+		ast.InfixExpr {
+			return ast.InfixExpr{
+				...expr
+				left:  transform_expr(expr.left, mut table)
+				right: transform_expr(expr.right, mut table)
+			}
+		}
+		ast.PrefixExpr {
+			return ast.PrefixExpr{
+				...expr
+				right: transform_expr(expr.right, mut table)
+			}
+		}
+		ast.PostfixExpr {
+			return ast.PostfixExpr{
+				...expr
+				expr: transform_expr(expr.expr, mut table)
+			}
+		}
+		ast.ParExpr {
+			return ast.ParExpr{
+				...expr
+				expr: transform_expr(expr.expr, mut table)
+			}
+		}
+		ast.SelectorExpr {
+			return ast.SelectorExpr{
+				...expr
+				expr: transform_expr(expr.expr, mut table)
+			}
+		}
+		ast.IndexExpr {
+			return ast.IndexExpr{
+				...expr
+				left:  transform_expr(expr.left, mut table)
+				index: transform_expr(expr.index, mut table)
+			}
+		}
+		ast.ArrayInit {
+			return ast.ArrayInit{
+				...expr
+				exprs: expr.exprs.map(transform_expr(it, mut table))
+			}
+		}
+		ast.MapInit {
+			return ast.MapInit{
+				...expr
+				keys: expr.keys.map(transform_expr(it, mut table))
+				vals: expr.vals.map(transform_expr(it, mut table))
+			}
+		}
+		ast.IfExpr {
+			return ast.IfExpr{
+				...expr
+				branches: expr.branches.map(ast.IfBranch{
+					...it
+					cond:  transform_expr(it.cond, mut table)
+					stmts: it.stmts.map(transform_stmt(it, mut table))
+				})
+			}
+		}
+		ast.MatchExpr {
+			return ast.MatchExpr{
+				...expr
+				cond:     transform_expr(expr.cond, mut table)
+				branches: expr.branches.map(ast.MatchBranch{
+					...it
+					exprs: it.exprs.map(transform_expr(it, mut table))
+					stmts: it.stmts.map(transform_stmt(it, mut table))
+				})
+			}
+		}
+		else {
+			return expr
+		}
+	}
+}
+
+// Only used for replacing CallExpr with CastExpr after parsing
+pub fn transform_stmt(stmt ast.Stmt, mut table ast.Table) ast.Stmt {
+	match stmt {
+		ast.ExprStmt {
+			return ast.ExprStmt{
+				...stmt
+				expr: transform_expr(stmt.expr, mut table)
+			}
+		}
+		ast.AssignStmt {
+			return ast.AssignStmt{
+				...stmt
+				left:  stmt.left.map(transform_expr(it, mut table))
+				right: stmt.right.map(transform_expr(it, mut table))
+			}
+		}
+		ast.Return {
+			return ast.Return{
+				...stmt
+				exprs: stmt.exprs.map(transform_expr(it, mut table))
+			}
+		}
+		ast.FnDecl {
+			return ast.FnDecl{
+				...stmt
+				stmts: stmt.stmts.map(transform_stmt(it, mut table))
+			}
+		}
+		ast.ForStmt {
+			return ast.ForStmt{
+				...stmt
+				cond:  transform_expr(stmt.cond, mut table)
+				stmts: stmt.stmts.map(transform_stmt(it, mut table))
+			}
+		}
+		ast.ForCStmt {
+			return ast.ForCStmt{
+				...stmt
+				cond:  transform_expr(stmt.cond, mut table)
+				inc:   transform_stmt(stmt.inc, mut table)
+				stmts: stmt.stmts.map(transform_stmt(it, mut table))
+			}
+		}
+		ast.ForInStmt {
+			return ast.ForInStmt{
+				...stmt
+				cond:  transform_expr(stmt.cond, mut table)
+				stmts: stmt.stmts.map(transform_stmt(it, mut table))
+			}
+		}
+		ast.Block {
+			return ast.Block{
+				...stmt
+				stmts: stmt.stmts.map(transform_stmt(it, mut table))
+			}
+		}
+		else {
+			return stmt
+		}
+	}
+}
+
 fn (mut p Parser) init_parse_fns() {
 	// p.prefix_parse_fns = make(100, 100, sizeof(PrefixParseFn))
 	// p.prefix_parse_fns[token.Kind.name] = parse_name
